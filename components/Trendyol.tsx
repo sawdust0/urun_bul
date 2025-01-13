@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -31,6 +31,16 @@ interface SortConfig {
   order: SortOrder;
 }
 
+interface CacheData {
+  bestSellers: Product[];
+  mostViewed: Product[];
+  mostFavorited: Product[];
+  mostRated: Product[];
+  flashSales: Product[];
+  mostAddedToCart: Product[];
+  lastUpdate: Date | null;
+}
+
 export function Trendyol() {
   const [bestSellers, setBestSellers] = useState<Product[]>([]);
   const [mostViewed, setMostViewed] = useState<Product[]>([]);
@@ -54,26 +64,38 @@ export function Trendyol() {
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [isFromCache, setIsFromCache] = useState(false);
 
-  const loadFromLocalStorage = () => {
+  const loadFromLocalStorage = useCallback(() => {
     try {
       const storedData = localStorage.getItem('trendyolData');
       if (storedData) {
         const data = JSON.parse(storedData);
-        setBestSellers(data.bestSellers || []);
-        setMostViewed(data.mostViewed || []);
-        setMostFavorited(data.mostFavorited || []);
-        setMostRated(data.mostRated || []);
-        setFlashSales(data.flashSales || []);
-        setMostAddedToCart(data.mostAddedToCart || []);
-        setLastUpdate(data.lastUpdate ? new Date(data.lastUpdate) : null);
-        setIsFromCache(true);
+        if (data.lastUpdate) {
+          const lastUpdateDate = new Date(data.lastUpdate);
+          const now = new Date();
+          const hoursDiff = (now.getTime() - lastUpdateDate.getTime()) / (1000 * 60 * 60);
+          
+          // Only load from cache if it's less than 24 hours old
+          if (hoursDiff < 24) {
+            setBestSellers(data.bestSellers || []);
+            setMostViewed(data.mostViewed || []);
+            setMostFavorited(data.mostFavorited || []);
+            setMostRated(data.mostRated || []);
+            setFlashSales(data.flashSales || []);
+            setMostAddedToCart(data.mostAddedToCart || []);
+            setLastUpdate(lastUpdateDate);
+            setIsFromCache(true);
+            return true;
+          }
+        }
       }
+      return false;
     } catch (error) {
       console.error('Error loading from localStorage:', error);
+      return false;
     }
-  };
+  }, []);
 
-  const saveToLocalStorage = (data: any) => {
+  const saveToLocalStorage = (data: CacheData) => {
     try {
       localStorage.setItem('trendyolData', JSON.stringify({
         bestSellers: data.bestSellers,
@@ -89,7 +111,7 @@ export function Trendyol() {
     }
   };
 
-  const fetchFromApi = async (endpoint: string, forceRefresh: boolean = false) => {
+  const fetchFromApi = useCallback(async (endpoint: string, forceRefresh: boolean = false) => {
     const url = `/api/trendyol?endpoint=${endpoint}${forceRefresh ? '&refresh=true' : ''}`;
     const response = await fetch(url);
     if (!response.ok) {
@@ -103,9 +125,9 @@ export function Trendyol() {
       throw new Error(result.error);
     }
     return result;
-  };
+  }, []);
 
-  const fetchData = async (forceRefresh: boolean = false) => {
+  const fetchData = useCallback(async (forceRefresh: boolean = false) => {
     if (isRateLimited) {
       toast({
         title: "Rate Limit",
@@ -116,8 +138,8 @@ export function Trendyol() {
     }
 
     if (!forceRefresh) {
-      loadFromLocalStorage();
-      return;
+      const loadedFromCache = loadFromLocalStorage();
+      if (loadedFromCache) return;
     }
 
     setLoading(true);
@@ -138,7 +160,7 @@ export function Trendyol() {
         fetchFromApi('most-added-to-cart', forceRefresh)
       ]);
 
-      const newData = {
+      const newData: CacheData = {
         bestSellers: bestSellersResult.data,
         mostViewed: mostViewedResult.data,
         mostFavorited: mostFavoritedResult.data,
@@ -175,16 +197,16 @@ export function Trendyol() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [isRateLimited, toast, loadFromLocalStorage, fetchFromApi]);
 
   useEffect(() => {
-    fetchData(false); // Load from localStorage on initial render
+    fetchData(false);
     return () => {
       if (rateLimitTimeoutRef.current) {
         clearTimeout(rateLimitTimeoutRef.current);
       }
     };
-  }, []);
+  }, [fetchData]);
 
   const sortProducts = (products: Product[], sortConfig: SortConfig | null) => {
     if (!sortConfig) return products;

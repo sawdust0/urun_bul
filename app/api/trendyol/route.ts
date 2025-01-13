@@ -38,7 +38,7 @@ const headers = {
 };
 
 // Cache
-let trendCache: Cache = {
+const trendCache: Cache = {
   data: {},
   timestamps: {},
   lastUpdate: null
